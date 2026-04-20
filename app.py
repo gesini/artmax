@@ -431,6 +431,45 @@ def inserir_venda(cliente_id, data, cliente, valor, servico, profissional, comis
         "forma_pagamento": forma_pagamento if forma_pagamento else None,
         "observacao": observacao if observacao else None,
     }).execute()
+def atualizar_cliente(cliente_id, nome, whatsapp="", aniversario=None, observacao=""):
+    payload = {
+        "nome": nome.strip(),
+        "whatsapp": normalize_phone(whatsapp) if whatsapp.strip() else None,
+        "aniversario": aniversario if aniversario else None,
+        "observacao": observacao.strip() if observacao else None,
+    }
+    return sb.table("clientes").update(payload).eq("id", cliente_id).execute()
+
+def excluir_cliente(cliente_id):
+    return sb.table("clientes").delete().eq("id", cliente_id).execute()
+
+def atualizar_venda(venda_id, cliente, valor, servico, profissional, forma_pagamento="", observacao=""):
+    comissao = calc_comissao(profissional, servico, float(valor))
+    payload = {
+        "cliente": cliente.strip(),
+        "valor": float(valor),
+        "servico": servico,
+        "profissional": profissional,
+        "comissao": float(comissao),
+        "forma_pagamento": forma_pagamento if forma_pagamento else None,
+        "observacao": observacao.strip() if observacao else None,
+    }
+    return sb.table("vendas").update(payload).eq("id", venda_id).execute()
+
+def excluir_venda(venda_id):
+    return sb.table("vendas").delete().eq("id", venda_id).execute()
+
+def atualizar_gasto(gasto_id, descricao, valor, categoria="", observacao=""):
+    payload = {
+        "descricao": descricao.strip(),
+        "valor": float(valor),
+        "categoria": categoria if categoria else None,
+        "observacao": observacao.strip() if observacao else None,
+    }
+    return sb.table("gastos").update(payload).eq("id", gasto_id).execute()
+
+def excluir_gasto(gasto_id):
+    return sb.table("gastos").delete().eq("id", gasto_id).execute()
 
 def listar_vendas(inicio, fim):
     return sb.table("vendas") \
@@ -726,6 +765,55 @@ elif menu == "Clientes":
         if busca.strip():
             df_show = df_show[df_show["nome"].str.contains(busca.strip(), case=False, na=False)]
         st.dataframe(df_show, width="stretch")
+    st.markdown("---")
+    with st.expander("✏️ Editar / 🗑️ Excluir cliente"):
+            if df_show.empty:
+                st.info("Nenhum cliente para editar.")
+            else:
+                cliente_id_sel = st.selectbox(
+                    "Selecione o cliente",
+                    df_show["id"].tolist(),
+                    format_func=lambda x: f"ID {x} - {df_show[df_show['id'] == x].iloc[0]['nome']}"
+                )
+
+                row = df_show[df_show["id"] == cliente_id_sel].iloc[0]
+
+                nome_atual = row["nome"] if pd.notna(row.get("nome")) else ""
+                whatsapp_atual = row["whatsapp"] if pd.notna(row.get("whatsapp")) else ""
+                aniversario_atual = str(row["aniversario"]) if pd.notna(row.get("aniversario")) else ""
+                observacao_atual = row["observacao"] if pd.notna(row.get("observacao")) else ""
+
+                with st.form("editar_cliente_form"):
+                    nome_ed = st.text_input("Nome", value=nome_atual)
+                    whatsapp_ed = st.text_input("WhatsApp", value=whatsapp_atual)
+                    aniversario_ed = st.text_input("Aniversário (YYYY-MM-DD)", value=aniversario_atual)
+                    observacao_ed = st.text_area("Observação", value=observacao_atual)
+
+                    salvar_cliente = st.form_submit_button("Salvar alterações")
+
+                    if salvar_cliente:
+                        atualizar_cliente(
+                            cliente_id_sel,
+                            nome_ed,
+                            whatsapp_ed,
+                            aniversario_ed.strip() or None,
+                            observacao_ed
+                        )
+                        st.success("Cliente atualizado com sucesso.")
+                        st.rerun()
+
+                confirmar_excluir_cliente = st.checkbox(
+                    "Confirmo que quero excluir este cliente",
+                    key="confirmar_excluir_cliente"
+                )
+
+                if st.button("Excluir cliente", disabled=not confirmar_excluir_cliente):
+                    try:
+                        excluir_cliente(cliente_id_sel)
+                        st.success("Cliente excluído com sucesso.")
+                        st.rerun()
+                    except Exception:
+                        st.error("Não foi possível excluir. Esse cliente pode estar ligado a agenda, vendas ou mensagens.")
 
 # =========================================================
 # AGENDA
@@ -1004,6 +1092,54 @@ elif menu == "gastos":
         st.info("Nenhuma despesa neste mês.")
     else:
         st.dataframe(df_gm, width="stretch")
+        st.markdown("---")
+        with st.expander("✏️ Editar / 🗑️ Excluir gasto"):
+            if df_gm.empty:
+                st.info("Nenhum gasto para editar.")
+            else:
+                gasto_id_sel = st.selectbox(
+                    "Selecione o gasto",
+                    df_gm["id"].tolist(),
+                    format_func=lambda x: f"ID {x} - {df_gm[df_gm['id'] == x].iloc[0]['descricao']} - R$ {float(df_gm[df_gm['id'] == x].iloc[0]['valor']):.2f}"
+                )
+
+                row = df_gm[df_gm["id"] == gasto_id_sel].iloc[0]
+
+                categorias = ["Produto", "Aluguel", "Internet", "Energia", "Manutenção", "Outros"]
+
+                desc_atual = row["descricao"] if pd.notna(row.get("descricao")) else ""
+                valor_atual = float(row["valor"]) if pd.notna(row.get("valor")) else 0.0
+                categoria_atual = row["categoria"] if pd.notna(row.get("categoria")) and row.get("categoria") in categorias else "Outros"
+                observacao_atual = row["observacao"] if pd.notna(row.get("observacao")) else ""
+
+                with st.form("editar_gasto_form"):
+                    desc_ed = st.text_input("Descrição", value=desc_atual)
+                    valor_ed = st.number_input("Valor", min_value=0.0, value=valor_atual, format="%.2f")
+                    categoria_ed = st.selectbox("Categoria", categorias, index=categorias.index(categoria_atual))
+                    observacao_ed = st.text_area("Observação", value=observacao_atual)
+
+                    salvar_gasto = st.form_submit_button("Salvar alterações")
+
+                    if salvar_gasto:
+                        atualizar_gasto(
+                            gasto_id_sel,
+                            desc_ed,
+                            valor_ed,
+                            categoria_ed,
+                            observacao_ed
+                        )
+                        st.success("Gasto atualizado com sucesso.")
+                        st.rerun()
+
+                confirmar_excluir_gasto = st.checkbox(
+                    "Confirmo que quero excluir este gasto",
+                    key="confirmar_excluir_gasto"
+                )
+
+                if st.button("Excluir gasto", disabled=not confirmar_excluir_gasto):
+                    excluir_gasto(gasto_id_sel)
+                    st.success("Gasto excluído com sucesso.")
+                    st.rerun()
 
 # =========================================================
 # VENDAS
